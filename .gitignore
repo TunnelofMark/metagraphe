@@ -1,0 +1,22 @@
+# Book outputs, scans, and copyrighted deliverables (never commit)
+ocr_full/
+ocr_yibai/
+ocr_test/
+download/
+*.pdf
+*.PDF
+*.epub
+*.EPUB
+
+# Local environments, editor metadata, and backups
+.venv-win/
+.venv/
+.claude/
+*.bak
+*.log
+*.tmp
+
+# Python caches
+**/__pycache__/
+*.py[cod]
+.pytest_cache/

@@ -1,0 +1,26 @@
+{
+  "xigang": {
+    "pdf": "H:/电子书/地方志/大连/XFZ23703.西岗区志.pdf",
+    "wsl_pdf": "/mnt/h/电子书/地方志/大连/XFZ23703.西岗区志.pdf",
+    "title": "西岗区志",
+    "test_pages": "1-12,99-110,296-303"
+  },
+  "rizhao": {
+    "pdf": "H:/电子书/地方志/山东/XFZ29417.日照市志.pdf",
+    "wsl_pdf": "/mnt/h/电子书/地方志/山东/XFZ29417.日照市志.pdf",
+    "title": "日照市志",
+    "test_pages": "1-6,195-205,264-266,412-424"
+  },
+  "xigangspeed": {
+    "pdf": "H:/电子书/地方志/大连/XFZ23703.西岗区志.pdf",
+    "wsl_pdf": "/mnt/h/电子书/地方志/大连/XFZ23703.西岗区志.pdf",
+    "title": "西岗区志",
+    "test_pages": "300-399"
+  },
+  "rizhaospeed": {
+    "pdf": "H:/电子书/地方志/山东/XFZ29417.日照市志.pdf",
+    "wsl_pdf": "/mnt/h/电子书/地方志/山东/XFZ29417.日照市志.pdf",
+    "title": "日照市志",
+    "test_pages": "400-499"
+  }
+}
