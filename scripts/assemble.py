@@ -154,8 +154,8 @@ def sanitize_prose_md(s):
                lambda m: m.group(0) if re.match(r"^(?:sup|sub|br\s*/?)$", m.group(2), re.I) else f"&lt;{m.group(1)}{m.group(2)}&gt;",
                s)
     s = re.sub(r"(?<!\!)\]\(", r"]\(", s)
-    # Escape OCR-emitted `^[` (Pandoc inline-footnote opener) to prevent exponential backtracking / OOM
-    s = s.replace("^[", r"\^[")
+    # Escape OCR-emitted `^[` (and unclosed `[` after `^`) to prevent exponential backtracking / OOM in Pandoc
+    s = s.replace("^[", r"\^\[")
     return s
 
 
