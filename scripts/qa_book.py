@@ -36,7 +36,19 @@ LATEX_RAW = set("{}^\\_")
 
 
 def hashes(doc):
-    return [[hashlib.sha256(doc.xref_stream_raw(img[0])).hexdigest() for img in pg.get_images(full=True)] for pg in doc]
+    cache = {}
+    out = []
+    for pg in doc:
+        row = []
+        for img in pg.get_images(full=True):
+            xref = img[0]
+            h = cache.get(xref)
+            if h is None:
+                h = hashlib.sha256(doc.xref_stream_raw(xref)).hexdigest()
+                cache[xref] = h
+            row.append(h)
+        out.append(row)
+    return out
 
 
 def old_layer_pages(path):

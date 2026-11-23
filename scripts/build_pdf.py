@@ -38,8 +38,17 @@ def image_hashes(pdf_path, pages=None):
     """sha256 of raw (still-encoded) image streams per page, to prove images are untouched."""
     doc = pymupdf.open(pdf_path)
     out = []
+    cache = {}
     for i in (pages or range(doc.page_count)):
-        out.append([hashlib.sha256(doc.xref_stream_raw(img[0])).hexdigest() for img in doc[i].get_images(full=True)])
+        row = []
+        for img in doc[i].get_images(full=True):
+            xref = img[0]
+            h = cache.get(xref)
+            if h is None:
+                h = hashlib.sha256(doc.xref_stream_raw(xref)).hexdigest()
+                cache[xref] = h
+            row.append(h)
+        out.append(row)
     return out
 
 

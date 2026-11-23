@@ -10,7 +10,9 @@ import io
 import shutil
 import subprocess
 import pymupdf
-from PIL import Image
+from PIL import Image, ImageFile
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 JPEGTRAN = shutil.which("jpegtran")
 
@@ -75,15 +77,29 @@ class NativePage:
         x0, y0, x1, y1 = self.to_pixels(bbox, margin_pt)
         rot = self.page.rotation
         if not self.fallback_render and self.filter == "DCTDecode" and JPEGTRAN and rot == 0:
+            import os
             path = f"{out_stem}.jpg"
             src = f"{out_stem}.__src.jpg"
-            open(src, "wb").write(self.raw_jpeg())
-            subprocess.run([JPEGTRAN, "-copy", "none", "-crop", f"{x1 - x0}x{y1 - y0}+{x0}+{y0}",
-                            "-outfile", path, src], check=True)
-            import os
-            os.remove(src)
-            w, h = Image.open(path).size
-            return {"path": path, "w": w, "h": h, "dpi": self.dpi(), "lossless": True}
+            try:
+                open(src, "wb").write(self.raw_jpeg())
+                subprocess.run([JPEGTRAN, "-copy", "none", "-crop", f"{x1 - x0}x{y1 - y0}+{x0}+{y0}",
+                                "-outfile", path, src], check=True)
+                w, h = Image.open(path).size
+                return {"path": path, "w": w, "h": h, "dpi": self.dpi(), "lossless": True}
+            except (subprocess.CalledProcessError, OSError):
+                # Truncated / corrupt embedded JPEG: fall back cleanly to 300 dpi PyMuPDF render crop
+                if os.path.exists(path):
+                    os.remove(path)
+                self.fallback_render = True
+                self._fallback_dpi = 300
+                self._im = None
+                pix = self.page.get_pixmap(dpi=self._fallback_dpi)
+                self.W, self.H = pix.width, pix.height
+                self._im = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                x0, y0, x1, y1 = self.to_pixels(bbox, margin_pt)
+            finally:
+                if os.path.exists(src):
+                    os.remove(src)
         im = self.pil().crop((x0, y0, x1, y1))
         if rot and not self.fallback_render:
             im = im.rotate(-rot, expand=True)       # PIL rotates counter-clockwise
