@@ -14,6 +14,7 @@
 ## 目录
 
 - [适用场景与边界限制](#适用场景与边界限制)
+- [按输入来源选择处理路径](#按输入来源选择处理路径)
 - [运行环境与硬件要求](#运行环境与硬件要求)
 - [流水线架构](#流水线架构)
 - [交付产物与阅读器兼容性](#交付产物与阅读器兼容性)
@@ -40,7 +41,40 @@
 - **手写体稿本 / 漫画 / 纯画册**：MinerU 与后处理面向印刷体文字书，漫画建议直接保留原图，不建议走本流水线；
 - **重度数学公式排版**：行内公式仅清洗为可读 Unicode 文本（去 LaTeX 残留），不面向以复杂多行公式为主的理工科教材；
 - **加密 / DRM 保护文件**：需用户自行准备未加密的只读源 PDF，本工具不提供也不支持任何 DRM 绕过；
-- **纯 CPU 环境**：仅 `post`（重打包 EPUB / 双层 PDF）与 `qa` 阶段可在纯 CPU 下运行；`recognize`（MinerU）与 `layout`（PP-DocLayoutV3）**强依赖 NVIDIA CUDA GPU**。
+- **纯 CPU 环境**：仅 `post`（重打包 EPUB / 双层 PDF）、`qa` 以及「已有 OCR `.docx` 直转 EPUB 3」快捷路径可在纯 CPU 下运行；`recognize`（MinerU）与 `layout`（PP-DocLayoutV3）**强依赖 NVIDIA CUDA GPU**。
+
+---
+
+## 按输入来源选择处理路径
+
+开始处理前，先按手头文件的来源类型选择对应路径：
+
+| 输入来源类型 | 典型特征 | 推荐处理路径 | 硬件与耗时 |
+| --- | --- | --- | --- |
+| **类型 A：纯扫描 PDF / 含劣质旧 OCR 层 PDF**（默认主线） | 仅有扫描版 PDF，或需同时产出“原图零损双层 PDF + 出版级 EPUB 3.3（含双端弹窗脚注）” | `run_all.sh`（MinerU 4.x + PP-DocLayoutV3 → `assemble.py` / `build_pdf.py`） | NVIDIA GPU（约 15–25 分钟/本） |
+| **类型 B：已有可用 OCR `.docx`**（纯 CPU 快捷路径） | 目录中已有 ABBYY / WPS / Acrobat 等转出的完整 `.docx`（可选配原扫描 PDF 首页作封面），只需快速生成干净的 EPUB 3.3 | `scripts/docx_to_epub.py`（先 `--inspect` 预检，再直出 EPUB 3.3） | **纯 CPU、零外部 Python 依赖**（数秒完成） |
+
+### 类型 B：OCR `.docx` → EPUB 3.3 使用要点
+
+`scripts/docx_to_epub.py` 针对扫描 PDF 转出的 `.docx` 内置了四项常见清洗逻辑，无需重跑 GPU OCR：
+1. **OOXML 重复节点去重**：跳过 `mc:AlternateContent` 中的 `mc:Fallback`，并隔离直接正文 run 与嵌套 `w:txbxContent`，避免文字与插图双份重复；
+2. **碎片装饰图过滤**：结合文件体积（默认 `>= 4 KB`）与纯 Python 解析的 PNG/JPEG 像素尺寸（默认短边 `>= 60 px`），过滤 PDF 转换器切出的分隔线/页眉细条，完整保留正文插图与地图；
+3. **版面“伪表格”解包**：自动区分真正的数据表（如编委会名单）与图文混排/扉页版面伪表，将伪表解包为普通 `<figure>` + `<p>`，消除多余边框；
+4. **扉页艺术字与排版清洗**：自动清理孤立页码、书名页眉及中文字间因 PDF 断行产生的多余空格，提取 CIP 元数据并可选通过 `--cover-pdf` 从原 PDF 首页渲染封面；若书籍章节扉页使用大量艺术字导致 OCR 乱码，可配合 `--chapters chapters.json` 指定目录真值切章。
+
+```bash
+# 1. 只读预检：评估已有 .docx 的字数、图片分布、CIP 元数据与候选标题
+python3 scripts/docx_to_epub.py --inspect /path/to/book.docx
+
+# 2. 纯 CPU 直出 EPUB 3.3（可选配原扫描 PDF 抽取封面）
+python3 scripts/docx_to_epub.py /path/to/book.docx /path/to/book.epub \
+  --cover-pdf /path/to/book.pdf
+
+# 3. 验证生成的 EPUB 3.3（如已安装 EPUBCheck）
+java -jar /opt/ocr/epubcheck/epubcheck.jar /path/to/book.epub
+```
+
+> **提示**：类型 B 面向流式 `.docx`（无可靠页级 `bbox`），不产出双层 PDF；若发现 `.docx` 本身错字严重、缺页或需要“原图零损双层 PDF + 双端弹窗脚注”，请直接走 **类型 A** 主线。
 
 ---
 
@@ -188,6 +222,8 @@ metagraphe/
     ├── qa_book.py                 # 自动化质量验收（原图 SHA256/旧层/字符/空白页）
     ├── review_suspects.py         # 疑难页分诊与可视化 HTML 复核看板
     ├── inspect_pdf.py             # 源 PDF 只读预检工具
+    ├── docx_to_epub.py            # 纯 CPU 快捷路径：已有 OCR .docx 直转 EPUB 3.3
+    ├── test_docx_to_epub.py       # OCR .docx 快捷路径离线回归测试（零外部依赖）
     └── test_pipeline_fixes.py     # 核心机制离线回归测试
 ```
 
