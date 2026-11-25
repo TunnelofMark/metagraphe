@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Re-run adapters + assemble + epubcheck + two-layer PDF for every tool/book, then MinerU's own EPUB.
-P=/mnt/e/project/provenance
+P="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 for tool in mineru_advanced paddleocr_vl ppstructurev3; do
   for book in xigang rizhao; do
     echo "##### $tool $book"

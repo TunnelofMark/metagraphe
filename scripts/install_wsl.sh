@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reproducible environment setup inside WSL2 Ubuntu 24.04 (run as root).
-#   wsl -d Ubuntu-24.04 -u root -- bash /mnt/e/project/provenance/scripts/install_wsl.sh [step...]
+#   wsl -d Ubuntu-24.04 -u root -- bash /mnt/e/project/metagraphe/scripts/install_wsl.sh [step...]
 # Steps: base mineru paddle paddle_vllm post   (default: all)
 # Every env lives under /opt/ocr/<name>; model caches under /opt/ocr/cache.
 set -euo pipefail

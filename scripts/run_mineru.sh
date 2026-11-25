@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Tool A: MinerU 4.x on a book's test subset.
 #   run_mineru.sh <book> <tier> [pages]
-# Outputs: /mnt/e/project/provenance/ocr_test/mineru_<tier>/<book>/
+# Outputs: <repo>/ocr_test/mineru_<tier>/<book>/
 set -eu
 book=$1; tier=$2; pages=${3:-all}
-P=/mnt/e/project/provenance
+P="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source /opt/ocr/mineru/bin/activate
 export HF_HOME=/opt/ocr/cache/hf MODELSCOPE_CACHE=/opt/ocr/cache/modelscope
 export MINERU_MODEL_SMALL_BACKEND=torch MINERU_MODEL_VLM_ENGINE=vllm

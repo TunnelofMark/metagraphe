@@ -5,7 +5,7 @@
 # Reads <book_out_dir>/work/{raw,pages.json,layout}; writes the deliverables into <book_out_dir>.
 set -eu
 src=$1; out=$2; name=$3; title=$4
-S=/mnt/e/project/provenance/scripts
+S="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 W=$out/work
 PY=/opt/ocr/post/bin/python
 $PY $S/adapt_mineru.py "$W" "$W/pages.json"

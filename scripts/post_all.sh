@@ -3,7 +3,7 @@
 #   post_all.sh <tool_dir_name> <book>      e.g. post_all.sh mineru_advanced xigang
 set -eu
 tool=$1; book=$2
-P=/mnt/e/project/provenance
+P="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 S=$P/scripts
 D=$P/ocr_test/$tool/$book
 PY=/opt/ocr/post/bin/python

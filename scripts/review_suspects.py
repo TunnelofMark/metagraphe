@@ -6,7 +6,7 @@ Usage:
     /opt/ocr/post/bin/python review_suspects.py <book_dir> [--out <review_dir>] [--max-thumbs 24]
 
   Batch triage summary across all books in ocr_full/ (writes a compact JSON summary):
-    /opt/ocr/post/bin/python review_suspects.py --batch /mnt/e/project/provenance/ocr_full --out /tmp/batch_triage.json
+    /opt/ocr/post/bin/python review_suspects.py --batch /mnt/e/project/metagraphe/ocr_full --out /tmp/batch_triage.json
 
 Never modifies original PDFs or existing book deliverables. Never hallucinates or fabricates text.
 """
@@ -166,7 +166,7 @@ def triage_book(book_dir, pdf_override=None, top_k=15):
     if high_pages and qa.get("source_pdf"):
         prange = ",".join(str(p) for p in high_pages[:10])
         queue["suggested_verify_cmd"] = (
-            f"/opt/ocr/post/bin/python /mnt/e/project/provenance/scripts/verify_pdf.py "
+            f"/opt/ocr/post/bin/python {pathlib.Path(__file__).resolve().parent / 'verify_pdf.py'} "
             f"\"{book_dir / f'{name}_双层.pdf'}\" \"{qa['source_pdf']}\" "
             f"--pages {prange} --show {prange} --png-dir /tmp/verify_{name}"
         )

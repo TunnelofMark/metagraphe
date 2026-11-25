@@ -4,7 +4,7 @@
 # Output: <layout_dir>/pNNNN_res.json + timing.json, <layout_dir>/run.{time.json,gpu.csv,stdout.log}
 set -eu
 pdf=$1; pages=$2; out=$3
-P=/mnt/e/project/provenance
+P="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source /opt/ocr/paddle/bin/activate
 export PADDLE_PDX_CACHE_HOME=/opt/ocr/cache/paddlex PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
 mkdir -p "$out"

@@ -24,20 +24,20 @@ import pymupdf
 from PIL import Image, ImageDraw, ImageFont
 from lxml import etree, html as lhtml
 from recrop import NativePage
-from textlayer import clean_html_equations
+from textlayer import clean_html_equations, clean_residual_latex
 
 CN = "一二三四五六七八九十百零〇"
 GAZETTEER_RX = re.compile(rf"^第[{CN}\d]+[编章节]")
 HEAD_RULES = [
     (re.compile(rf"^第[{CN}\d]+编"), 1),
-    (re.compile(r"^(序|序言|凡例|概述|总述|大事记|附录|后记|编后记|索引|目录|人物|专记)$"), 1),
+    (re.compile(r"^(序|序言|前言|凡例|编辑说明|概述|总述|大事记|大事年表|近代大事|现代大事|古代大事|当代大事|人物传记|人物名录|附录|后记|编后记|编纂始末|索引|目录|人物|专记)$"), 1),
     (re.compile(rf"^第[{CN}\d]+章"), 2),
     (re.compile(rf"^第[{CN}\d]+节"), 3),
     (re.compile(rf"^[{CN}]+、"), 4),
     (re.compile(rf"^[（(][{CN}]+[）)]"), 5),
 ]
 GENERAL_FRONT_BACK_RX = re.compile(
-    r"^(序|序言|自序|再版序|译者序|编者序|编者序言|前言|导言|引论|绪论|总论|目录|附录|后记|编后记|译后记|结语|尾声|参考文献|索引|跋)$"
+    r"^(序|序言|自序|再版序|译者序|编者序|编者序言|前言|凡例|编辑说明|概述|总述|大事记|大事年表|人物传记|人物名录|导言|引论|绪论|总论|目录|附录|后记|编后记|编纂始末|译后记|结语|尾声|参考文献|索引|跋)$"
     r"|^附录[{CN}\d：:·\s]".replace("{CN}", CN)
 )
 GENERAL_HEAD_RULES = [
@@ -111,7 +111,8 @@ def build_toc_matcher(pdf):
 
 
 def general_heading_shift(doc):
-    """For non-gazetteer books without a source PDF TOC, compute upward shift so top headings start at H1."""
+    """For non-gazetteer books without a source PDF TOC, compute upward shift so top headings start at H1.
+    Only shifts major structural tiers (lvl <= 3) so minor sub-items like '一、' or '(一)' never become H1."""
     lvls = []
     for p in doc.get("pages", []):
         for b in p.get("blocks", []):
@@ -119,7 +120,7 @@ def general_heading_shift(doc):
                 continue
             t = re.sub(r"\s+", "", b.get("text") or "")
             for rx, lvl in GENERAL_HEAD_RULES:
-                if rx.search(t):
+                if lvl <= 3 and rx.search(t):
                     lvls.append(lvl)
                     break
     return (min(lvls) - 1) if lvls else 0
@@ -131,8 +132,90 @@ def general_heading_level(text, tool_level, shift=0):
         return 1
     for rx, lvl in GENERAL_HEAD_RULES:
         if rx.search(t):
-            return max(1, min(5, lvl - shift))
+            return max(1, min(5, lvl - shift)) if lvl <= 3 else lvl
     return max(4, min(6, (tool_level or 4) + 3)) if tool_level else 4
+
+
+_NOISE_TITLE_RX = re.compile(
+    r"^(?:[一二三四五六七八九十\d]{1,2}|[（(][一二三四五六七八九十\d]+[）)]|[一二三四五六七八九十]+、.*|[\W_]+)$"
+)
+
+
+def build_fallback_heading_classifier(doc, toc_pages_set, page_roles, shift=0):
+    """Fallback heading level classifier for non-gazetteer books without a PDF outline whose
+    chapter headings lack standard '第X章/1.' prefixes (e.g. 人物志 or 极简上海志).
+    Uses MinerU tool_level==1 or bbox font-height clustering when normal rules yield < 4 H1/H2s.
+    Returns (classify_fn_or_None, prefer_split_level_2)."""
+    n_pages = len(doc.get("pages", []))
+    if n_pages < 30:
+        return None, False
+
+    body_titles = []
+    matched_struct = 0
+    for p in doc.get("pages", []):
+        pno = p["page"]
+        if pno in toc_pages_set or pno in page_roles:
+            continue
+        for b in p.get("blocks", []):
+            if b.get("type") != "title":
+                continue
+            raw_t = b.get("text") or ""
+            ct = re.sub(r"\s+", "", raw_t)
+            if any(lvl <= 3 and rx.search(ct) for rx, lvl in GENERAL_HEAD_RULES):
+                matched_struct += 1
+            h = float(b["bbox"][3] - b["bbox"][1]) if b.get("bbox") else 0.0
+            body_titles.append((b.get("level"), h, ct))
+
+    if matched_struct >= 3 or len(body_titles) < 5:
+        return None, False
+
+    def _is_valid_cand(ct):
+        if len(ct) < 2 or len(ct) > 45:
+            return False
+        if ct.endswith((":", "：", "。", "，", "；")):
+            return False
+        if _NOISE_TITLE_RX.match(ct):
+            return False
+        return True
+
+    lvl1_cands = [t for t in body_titles if t[0] == 1 and _is_valid_cand(t[2]) and t[1] >= 16.0]
+    if len(lvl1_cands) >= 4:
+        def _by_tool_level(b, raw_t):
+            base_lvl = general_heading_level(raw_t, b.get("level"), shift=shift)
+            if base_lvl <= 2:
+                return base_lvl
+            ct = re.sub(r"\s+", "", raw_t)
+            h = float(b["bbox"][3] - b["bbox"][1]) if b.get("bbox") else 0.0
+            if not _is_valid_cand(ct):
+                return base_lvl
+            if b.get("level") == 1 and h >= 16.0:
+                return 1
+            if b.get("level") == 2 and h >= 15.0:
+                return 2
+            return base_lvl
+        return _by_tool_level, False
+
+    # Uniform tool_level (e.g. MinerU emits level=2 for all headings): use bbox height tiers
+    h1_cands = [t for t in body_titles if _is_valid_cand(t[2]) and t[1] >= 24.0]
+    h2_cands = [t for t in body_titles if _is_valid_cand(t[2]) and 16.5 <= t[1] < 24.0]
+    if len(h1_cands) + len(h2_cands) >= 5:
+        def _by_height(b, raw_t):
+            base_lvl = general_heading_level(raw_t, b.get("level"), shift=shift)
+            if base_lvl <= 2:
+                return base_lvl
+            ct = re.sub(r"\s+", "", raw_t)
+            h = float(b["bbox"][3] - b["bbox"][1]) if b.get("bbox") else 0.0
+            if not _is_valid_cand(ct):
+                return base_lvl
+            if h >= 24.0:
+                return 1
+            if h >= 16.5:
+                return 2
+            return base_lvl
+        prefer_split2 = len(h2_cands) >= 8 and len(h1_cands) < max(12, n_pages // 40)
+        return _by_height, prefer_split2
+
+    return None, False
 
 
 def clean_title(text):
@@ -419,7 +502,7 @@ def patch_epub_postprocess(epub_path, isbn="", footnote_mode="dual"):
 
 CIRCLED_MARKS = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
 FN_LEAD_RX = re.compile(
-    rf"^(?P<mark>[{CIRCLED_MARKS}]|\*|\[(\d{{1,2}})\]|［(\d{{1,2}})］|〔(\d{{1,2}})〕|（(\d{{1,2}})）)\s*(?P<body>.+)$",
+    rf"^(?:注\s*[:：]?\s*)?(?P<mark>[{CIRCLED_MARKS}]|\*|\[(\d{{1,2}})\]|［(\d{{1,2}})］|〔(\d{{1,2}})〕|（(\d{{1,2}})）)\s*(?:注\s*[:：]\s*)?(?P<body>.+)$",
     re.S,
 )
 
@@ -535,9 +618,51 @@ def is_blockquote_block(b, page_w, frame):
     return (0.038 * fw <= indent_left <= 0.22 * fw) and (bw >= 0.52 * fw) and (x1 >= fcx + 0.18 * fw)
 
 
+PUBLISHER_RX = re.compile(
+    r"([\u4e00-\u9fff]{2,14}(?:出版社|书社|书局|印书馆|出版集团|出版公司|出版总社))"
+)
+POSTSCRIPT_TITLE_RX = re.compile(r"^(?:编后记|后记|编纂始末|跋|结语)$")
+STRONG_IMPRINT_KEYS = (
+    "ISBN", "开本", "印张", "第1版", "第一版", "出版发行", "出版、发行",
+    "版权所有", "新登字", "准印证号", "发行经销",
+)
+
+
+def _clean_cjk_spaces(s):
+    s = re.sub(r"\s+", " ", (s or "").strip())
+    return re.sub(r"(?<=[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef])\s+|\s+(?=[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef])", "", s)
+
+
+def is_copyright_page_blocks(vis, full_txt, labels_str=""):
+    """Determine whether a page's visible blocks constitute a CIP / copyright imprint page
+    (and NOT a narrative postscript such as 编后记 that happens to mention 出版/印刷)."""
+    if not full_txt:
+        return False
+    if CIP_RX.search(full_txt):
+        return True
+    is_postscript = any(
+        b.get("type") == "title" and POSTSCRIPT_TITLE_RX.match(re.sub(r"\s+", "", b.get("text") or ""))
+        for b in vis
+    )
+    if is_postscript:
+        return False
+    strong_hits = sum(1 for k in STRONG_IMPRINT_KEYS if k in full_txt)
+    imprint_hits = sum(1 for k in IMPRINT_KEYS if k in full_txt)
+    max_para = max((len((b.get("text") or "").strip()) for b in vis if b.get("type") == "text"), default=0)
+    if strong_hits >= 3:
+        return True
+    if strong_hits >= 2 and imprint_hits >= 3 and len(full_txt) <= 1050:
+        return True
+    if strong_hits >= 1 and imprint_hits >= 3 and max_para <= 180 and len(full_txt) <= 800:
+        return True
+    if imprint_hits >= 2 and "版权" in labels_str and len(full_txt) <= 1000:
+        return True
+    return False
+
+
 def extract_copyright_metadata(doc, page_roles):
-    """Extract optional publisher, publication date, and ISBN from detected copyright pages."""
-    meta = {"publisher": "", "date": "", "isbn": ""}
+    """Extract optional publisher, publication date, ISBN, and compiler/author from detected copyright pages."""
+    meta = {"publisher": "", "date": "", "isbn": "", "author": ""}
     cp_pages = [p for p in doc.get("pages", []) if page_roles.get(p["page"]) == "copyright_page"]
     if not cp_pages:
         return meta
@@ -546,17 +671,60 @@ def extract_copyright_metadata(doc, page_roles):
         for p in cp_pages for b in p.get("blocks", [])
         if (b.get("text") or "").strip()
     )
-    m_pub = re.search(r"([\u4e00-\u9fff]{2,14}出版社)", txt)
+    m_pub = PUBLISHER_RX.search(txt)
     if m_pub:
         meta["publisher"] = m_pub.group(1)
-    m_date = re.search(r"((?:19|20)\d{2})\s*年\s*(\d{1,2})\s*月\s*第?\s*1\s*版", txt)
+
+    m_date = re.search(
+        r"((?:19|20)\d{2})\s*年\s*(\d{1,2})\s*月(?:\s*[\u4e00-\u9fff]{0,4})?\s*第?\s*[1一]\s*版",
+        txt,
+    )
     if not m_date:
-        m_date = re.search(r"出版社[，,]\s*((?:19|20)\d{2})\.(\d{1,2})", txt)
+        m_date = re.search(
+            r"(?:出版社|书社|书局|印书馆|出版集团|出版公司|出版总社)[，,]\s*((?:19|20)\d{2})\.(\d{1,2})",
+            txt,
+        )
     if m_date:
         meta["date"] = f"{m_date.group(1)}-{int(m_date.group(2)):02d}"
-    m_isbn = re.search(r"ISBN\s*([0-9Xx][-0-9Xx\s]{8,20}[0-9Xx])", txt, re.I)
+    else:
+        m_yr = re.search(
+            r"(?:出版社|书社|书局|印书馆|出版集团|出版公司|出版总社)[，,]\s*((?:19|20)\d{2})\b",
+            txt,
+        )
+        if m_yr:
+            meta["date"] = m_yr.group(1)
+
+    m_isbn = re.search(r"ISBN\s*[-—–－]?\s*([0-9Xx][-—–－0-9Xx\s]{8,26}[0-9Xx])", txt, re.I)
     if m_isbn:
-        meta["isbn"] = re.sub(r"\s+", "", m_isbn.group(1))
+        clean_isbn = re.sub(r"[^0-9Xx]", "", m_isbn.group(1))
+        if len(clean_isbn) in (10, 13):
+            meta["isbn"] = clean_isbn
+
+    # Extract compiler / author from CIP slash line or imprint lines
+    author = ""
+    m_cip_auth = re.search(
+        r"/\s*([^/\n。；;]{2,40}?(?:编纂委员会(?:办公室)?|史志办公室|地方志办公室|地方史志办公室|地方志编委会|编委会|编著|主编|著|编))\s*[.。，,一—\-]",
+        txt,
+    )
+    if m_cip_auth:
+        author = _clean_cjk_spaces(m_cip_auth.group(1))
+    if not author:
+        m_labeled = re.search(r"(?:编者|编印者|作者|主编)\s*[:：]\s*([^\n，,。；;]{2,36})", txt)
+        if m_labeled:
+            cand = re.split(r"责任编辑|出版者|封面设计|版式设计", m_labeled.group(1))[0]
+            author = _clean_cjk_spaces(cand)
+    if not author:
+        for ln in txt.splitlines():
+            ln_c = _clean_cjk_spaces(ln)
+            m_org = re.match(
+                r"^([\u4e00-\u9fff（）()·]{2,34}(?:编纂委员会(?:办公室)?|史志办公室|地方志办公室|地方史志办公室|编委会))(?:编|编著|著)?$",
+                ln_c,
+            )
+            if m_org:
+                author = m_org.group(1) + ("编" if ln_c.endswith("编") else "")
+                break
+    if author and 2 <= len(author) <= 40:
+        meta["author"] = author
     return meta
 
 
@@ -662,7 +830,10 @@ def infer_block_align(b, page_w, frame, allow_body=True):
 
 
 CIP_RX = re.compile(r"图书在版编目|CIP\s*数据|中国版本图书馆", re.I)
-IMPRINT_KEYS = ("ISBN", "定价", "开本", "印张", "第1版", "印刷", "出版发行", "出版、发行", "版权所有", "责任编辑", "发行经销")
+IMPRINT_KEYS = (
+    "ISBN", "定价", "开本", "印张", "第1版", "第一版", "印刷",
+    "出版发行", "出版、发行", "版权所有", "责任编辑", "发行经销", "新登字", "准印证号",
+)
 BACK_COVER_RX = re.compile(r"上架建议|条形码|封面设计|装帧设计")
 MAKER_RX = re.compile(r"电子书制作|制作者|爱问共享|扫描制作|声明")
 
@@ -704,9 +875,7 @@ def classify_special_pages(doc, pdf, toc_pages_set):
             continue
 
         # 2) Copyright / CIP page (front-matter OR last 5 pages of the book)
-        imprint_hits = sum(1 for k in IMPRINT_KEYS if k in full_txt)
-        is_cip = bool(CIP_RX.search(full_txt))
-        is_copyright = is_cip or imprint_hits >= 3 or (imprint_hits >= 2 and ("版权" in labels_str or pno <= 8 or pno >= n_pages - 4))
+        is_copyright = is_copyright_page_blocks(vis, full_txt, labels_str=labels_str)
         if is_copyright and (pno < front_limit or pno >= n_pages - 4) and pno not in toc_pages_set:
             roles[pno] = "copyright_page"
             in_preface = False
@@ -866,8 +1035,79 @@ NON_AUTHOR_PAREN_RX = re.compile(
 )
 
 
-def extract_author(pdf, src_pdf_path, cli_author=""):
-    """Determine EPUB author (<dc:creator>): CLI --author -> source PDF metadata -> trailing '(Author)' in filename."""
+TOC_LEADER_RX = re.compile(
+    r"(?:…|\.{2,}|·{3,}|-{3,}|—{2,})\s*[（(\[]?\s*\d{1,4}\s*[）)\]]?\s*$"
+)
+TOC_SPACE_RX = re.compile(
+    r"^(?!.*(?:ISBN|CIP|印数|印张|字数|开本|定价|邮编|邮政编码|电话|地址|核字|新登字|版权|第\s*[1一]\s*版|出版|印刷))"
+    r"[^\d。！？；]{1,36}(?:\s+|/\s*)[（(]?\d{1,4}[）)]?\s*$"
+)
+CATALOG_PREFIX_RX = re.compile(r"^[A-Za-z]{2,6}\d{3,8}\.\s*")
+
+
+def clean_book_title(title):
+    """Strip library/catalog file prefixes such as 'XFZ13205.' from EPUB <dc:title>."""
+    t = (title or "").strip()
+    cleaned = CATALOG_PREFIX_RX.sub("", t).strip()
+    return cleaned or t
+
+
+def _is_toc_line(line):
+    s = line.strip()
+    if not s:
+        return False
+    return bool(TOC_LEADER_RX.search(s) or TOC_SPACE_RX.match(s))
+
+
+def detect_toc_pages(doc):
+    """Identify scanned paper TOC pages while protecting CIP/copyright pages and catching
+    parenthesized page numbers (e.g. '…… (72)') and sparse trailing TOC pages."""
+    toc_pages = set()
+    page_info = {}
+    for p in doc.get("pages", []):
+        pno = p["page"]
+        vis = [b for b in p.get("blocks", []) if b.get("type") not in SKIP]
+        full_txt = "\n".join((b.get("text") or "").strip() for b in vis if (b.get("text") or "").strip())
+        if is_copyright_page_blocks(vis, full_txt):
+            continue
+        textual = [b for b in vis if b.get("type") in ("title", "text", "toc", "list")]
+        if not textual:
+            continue
+        lines_per_blk = [[l.strip() for l in (b.get("text") or "").split("\n") if l.strip()] for b in textual]
+        hits = sum(1 for ls in lines_per_blk if any(_is_toc_line(l) for l in ls))
+        entries = sum(sum(1 for l in ls if _is_toc_line(l)) for ls in lines_per_blk)
+        leader_entries = sum(sum(1 for l in ls if TOC_LEADER_RX.search(l)) for ls in lines_per_blk)
+        has_mulu = any(
+            re.fullmatch(r"目\s*录|总\s*目\s*录", re.sub(r"\s+", "", (b.get("text") or "")))
+            for b in textual
+        )
+        max_para = max((len((b.get("text") or "").strip()) for b in textual if b.get("type") == "text"), default=0)
+        page_info[pno] = (len(textual), hits, entries, leader_entries, has_mulu, max_para)
+        if (entries >= 4 and hits >= 0.45 * len(textual)) or (
+            has_mulu and entries >= 2 and hits >= 0.35 * len(textual)
+        ) or (
+            has_mulu and len(textual) <= 12 and entries >= 1 and max_para <= 60
+        ):
+            toc_pages.add(pno)
+
+    # Second pass: include sparse trailing continuation pages immediately after a TOC page
+    changed = True
+    while changed:
+        changed = False
+        for pno, (ntxt, hits, entries, leader_entries, has_mulu, max_para) in sorted(page_info.items()):
+            if pno in toc_pages or (pno - 1) not in toc_pages:
+                continue
+            if max_para < 120 and (
+                (leader_entries >= 1 and entries >= 2)
+                or (entries >= 2 and hits >= 0.40 * ntxt)
+            ):
+                toc_pages.add(pno)
+                changed = True
+    return toc_pages
+
+
+def extract_author(pdf, src_pdf_path, cli_author="", cp_author=""):
+    """Determine EPUB author (<dc:creator>): CLI --author -> source PDF metadata -> trailing '(Author)' in filename -> copyright page."""
     if cli_author and cli_author.strip():
         return cli_author.strip()
     meta_author = ((pdf.metadata or {}).get("author") or "").replace("\x00", "").strip()
@@ -879,6 +1119,8 @@ def extract_author(pdf, src_pdf_path, cli_author=""):
         cand = m.group(1).strip()
         if cand and not NON_AUTHOR_PAREN_RX.match(cand):
             return cand
+    if cp_author and cp_author.strip():
+        return cp_author.strip()
     return ""
 
 
@@ -927,19 +1169,18 @@ def main():
     toc_matcher = None if gazetteer else build_toc_matcher(pdf)
     gen_shift = 0 if (gazetteer or toc_matcher) else general_heading_shift(doc)
 
-    toc_line = re.compile(r"(…|\.{3,}|·{3,}|-{3,}|—{2,})\s*\d{1,4}\s*$|\D\s*\d{1,4}\s*$")
-    toc_pages_set = set()
-    for p in doc["pages"]:
-        textual = [b for b in p["blocks"] if b["type"] in ("title", "text", "toc", "list")]
-        hits = [b for b in textual if any(toc_line.search(l.strip()) for l in (b.get("text") or "").split("\n"))]
-        entries = sum(len([l for l in (b.get("text") or "").split("\n") if toc_line.search(l.strip())]) for b in hits)
-        if entries >= 4 and len(hits) >= 0.5 * max(1, len(textual)):
-            toc_pages_set.add(p["page"])
+    toc_pages_set = detect_toc_pages(doc)
 
     book_frame = compute_book_frame(doc)
     page_roles = classify_special_pages(doc, pdf, toc_pages_set)
     doc["page_roles"] = {str(k): v for k, v in sorted(page_roles.items())}
     cp_meta = extract_copyright_metadata(doc, page_roles)
+
+    fallback_heading_clf, fallback_split2 = (
+        (None, False)
+        if (gazetteer or toc_matcher is not None)
+        else build_fallback_heading_classifier(doc, toc_pages_set, page_roles, shift=gen_shift)
+    )
 
     # Extract cover (p1) if present
     cover_rel = None
@@ -967,6 +1208,8 @@ def main():
                 continue
             if is_toc_page and b["type"] == "title" and re.sub(r"\s", "", b.get("text", "")) != "目录":
                 b["type"] = "toc"            # TOC entries are not headings / bookmarks
+            if not is_toc_page and b["type"] == "title" and TOC_LEADER_RX.search((b.get("text") or "").strip()):
+                b["type"] = "toc"            # Stray dotted-leader paper TOC line is never a real chapter heading
             if b["type"] == "toc":
                 b["text"] = (b.get("text") or "").strip()
             if b["type"] == "title":
@@ -981,6 +1224,8 @@ def main():
                         b["level"] = 1
                     else:
                         b["level"] = max(4, min(6, (b.get("level") or 4) + 3))
+                elif fallback_heading_clf is not None:
+                    b["level"] = fallback_heading_clf(b, raw_t)
                 else:
                     b["level"] = general_heading_level(raw_t, b.get("level"), shift=gen_shift)
                 b["text"] = clean_title(raw_t)
@@ -1067,7 +1312,7 @@ def main():
             # Consumed into an inline pop-up footnote ref: do NOT interrupt cross-page prose!
             b.pop("page", None)
             continue
-        raw_txt = fn_md_map.get(id(b), b.get("text") or "")
+        raw_txt = clean_residual_latex(fn_md_map.get(id(b), b.get("text") or ""))
         txt = raw_txt.strip()
         if t == "title":
             heading_txt = b.get("heading") or txt
@@ -1171,11 +1416,11 @@ def main():
 
     # Append Pandoc footnote definitions (Pandoc places each chapter's <aside> inside its own chapter XHTML)
     for fn_id, fn_body in fn_defs:
-        clean_body = sanitize_prose_md(re.sub(r"\s+", " ", fn_body).strip())
+        clean_body = sanitize_prose_md(clean_residual_latex(re.sub(r"\s+", " ", fn_body).strip()))
         md.append(f"[^{fn_id}]: {clean_body}")
 
-    title = a.title or doc.get("book", "")
-    author = extract_author(pdf, a.src_pdf, a.author)
+    title = clean_book_title(a.title or doc.get("book", ""))
+    author = extract_author(pdf, a.src_pdf, a.author, cp_author=cp_meta.get("author", ""))
     fm = [f"title: {json.dumps(title, ensure_ascii=False)}"]
     if author:
         fm.append(f"author: {json.dumps(author, ensure_ascii=False)}")
@@ -1227,8 +1472,8 @@ def main():
         'em{display:block;text-align:center;font-style:normal;font-size:0.85em}\n',
         encoding="utf-8",
     )
-    split_lvl = "2" if gazetteer else "1"
-    pandoc_cmd = ["pandoc", "book.md", "-f", "markdown+raw_html-markdown_in_html_blocks-implicit_figures", "-o", "book.epub",
+    split_lvl = "2" if (gazetteer or fallback_split2) else "1"
+    pandoc_cmd = ["pandoc", "book.md", "-f", "markdown+raw_html-markdown_in_html_blocks-implicit_figures-superscript-subscript-inline_notes", "-o", "book.epub",
                   "--toc-depth=3", f"--split-level={split_lvl}", "--css", "epub.css",
                   "--metadata", "lang=zh-CN"]
     if cover_rel:

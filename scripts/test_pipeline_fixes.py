@@ -5,7 +5,7 @@ Runs entirely inside a temporary directory (auto-cleaned on exit) and NEVER modi
 original PDFs under /mnt/h or existing outputs under ocr_full/.
 
 Usage:
-  /opt/ocr/post/bin/python /mnt/e/project/provenance/scripts/test_pipeline_fixes.py
+  /opt/ocr/post/bin/python scripts/test_pipeline_fixes.py
 """
 import json
 import os
@@ -18,6 +18,7 @@ import pikepdf
 import pymupdf
 
 SCRIPTS = pathlib.Path(__file__).resolve().parent
+ROOT = SCRIPTS.parent
 sys.path.insert(0, str(SCRIPTS))
 
 import adapt_mineru
@@ -121,7 +122,7 @@ def test_strip_old_layer_real_books(tmp):
 
 def test_build_pdf_tmp_cleanup(tmp):
     src = pathlib.Path("/mnt/h/电子书/地方志/大连/XFZ23703.西岗区志.pdf")
-    bj = pathlib.Path("/mnt/e/project/provenance/ocr_full/XFZ23703.西岗区志/book.json")
+    bj = ROOT / "ocr_full" / "XFZ23703.西岗区志" / "book.json"
     if not (src.exists() and bj.exists()):
         print("[SKIP] build_pdf tmp cleanup: sample book missing")
         return
@@ -163,7 +164,7 @@ def test_equation_inline_and_table_continuation(tmp):
     print(f"[PASS] inline equation de-LaTeX & inline join -> {joined}")
 
     # Real 日照市志 middle_json.json adapter test in isolated tmp folder
-    rizhao_work = pathlib.Path("/mnt/e/project/provenance/ocr_full/XFZ29417.日照市志/work")
+    rizhao_work = ROOT / "ocr_full" / "XFZ29417.日照市志" / "work"
     if (rizhao_work / "raw" / "middle_json.json").exists():
         w = tmp / "rizhao_work"
         w.mkdir()
@@ -232,7 +233,7 @@ def test_recrop_multi_image_fallback(tmp):
 
 
 def test_review_suspects_cangshan(tmp):
-    book_dir = pathlib.Path("/mnt/e/project/provenance/ocr_full/XFZ29383.苍山县志")
+    book_dir = ROOT / "ocr_full" / "XFZ29383.苍山县志"
     if not book_dir.exists():
         print("[SKIP] review_suspects: 苍山县志 not found")
         return
@@ -245,6 +246,69 @@ def test_review_suspects_cangshan(tmp):
     print(f"[PASS] review_suspects on 苍山县志: missed_content=0, margin_only_blank={len(q['margin_only_blank'])}, report={rh.name}")
 
 
+def test_epub_quality_fixes():
+    # 1) Residual LaTeX cleanup (\left/\right, array/aligned, \Omega, bare \text/\mathrm/\mathbf)
+    s1 = textlayer.clean_residual_latex(r"号码儿\left[xo^412mar^35\right] 与 10^-3 ~ 10^5\Omega 和 2\mathrm m^2")
+    assert r"\left" not in s1 and r"\right" not in s1 and r"\Omega" not in s1 and r"\mathrm" not in s1, s1
+    assert "[xo^412mar^35]" in s1 and "Ω" in s1 and "2m^2" in s1 or "2 m^2" in s1, s1
+    s2 = textlayer.clean_residual_latex(r"风压: \left\\beginarrayl1 号:10 791pa \\2 号:11 193pa\endarray\right.")
+    assert r"\begin" not in s2 and r"\end" not in s2 and r"\left" not in s2 and r"\right" not in s2, s2
+    assert "1 号:10 791pa" in s2 and "2 号:11 193pa" in s2, s2
+
+    # 2) Paper TOC detection: parenthesized page numbers + CIP copyright page protection
+    fake_doc = {
+        "pages": [
+            {"page": 3, "w": 600, "h": 800, "blocks": [
+                {"type": "title", "text": "图书在版编目(CIP)数据", "bbox": [50, 50, 300, 70]},
+                {"type": "text", "text": "大连市志·物价志/大连市史志办公室编.—北京:方志出版社，2004.9", "bbox": [50, 80, 500, 100]},
+                {"type": "text", "text": "ISBN 7-80192-314-6", "bbox": [50, 110, 300, 130]},
+                {"type": "text", "text": "IV. K293.13", "bbox": [50, 140, 200, 160]},
+                {"type": "text", "text": "1999年1月第一版", "bbox": [50, 170, 200, 190]},
+            ]},
+            {"page": 6, "w": 600, "h": 800, "blocks": [
+                {"type": "title", "text": "目录", "bbox": [50, 50, 120, 75]},
+                {"type": "title", "text": "第一章 机构沿革…… (30)", "bbox": [50, 100, 500, 120]},
+                {"type": "title", "text": "第二章 税制税额……（44）", "bbox": [50, 130, 500, 150]},
+                {"type": "title", "text": "第三章 税收管理…… (337)", "bbox": [50, 160, 500, 180]},
+            ]},
+            {"page": 7, "w": 600, "h": 800, "blocks": [
+                {"type": "title", "text": "第二节 大连北部地区税收管理 …… (339)", "bbox": [50, 100, 500, 120]},
+                {"type": "title", "text": "第三节 新中国成立后税收管理 …… (340)", "bbox": [50, 130, 500, 150]},
+            ]},
+        ]
+    }
+    toc_pages = assemble.detect_toc_pages(fake_doc)
+    assert 3 not in toc_pages, f"CIP page wrongly classified as TOC: {toc_pages}"
+    assert 6 in toc_pages and 7 in toc_pages, f"Parenthesized TOC pages missed: {toc_pages}"
+
+    # 3) Copyright metadata extraction (书社/书局, em-dash ISBN, 第一版 date, compiler) + 编后记 guard
+    cp_doc = {
+        "pages": [
+            {"page": 2, "w": 600, "h": 800, "blocks": [
+                {"type": "text", "text": "日照市志\n山东省日照市史志编纂委员会 编\n齐鲁书社出版发行\n787×1092 毫米 16 开本 53 印张\n1994年11月北京第一版\nISBN 7—5333—0401—2", "bbox": [50, 100, 500, 400]}
+            ]}
+        ]
+    }
+    meta = assemble.extract_copyright_metadata(cp_doc, {2: "copyright_page"})
+    assert meta["publisher"] == "齐鲁书社", meta
+    assert meta["date"] == "1994-11", meta
+    assert meta["isbn"] == "7533304012", meta
+    assert "日照市史志编纂委员会" in meta["author"], meta
+
+    postscript_vis = [
+        {"type": "title", "text": "编后记"},
+        {"type": "text", "text": "本志经多年编修，于1996年12月出版印刷，责任编辑付出辛劳。" * 10},
+    ]
+    assert not assemble.is_copyright_page_blocks(postscript_vis, "编后记\n" + postscript_vis[1]["text"])
+
+    # 4) Catalog title cleaning & 注:① footnote matching
+    assert assemble.clean_book_title("XFZ13205.双城县志") == "双城县志"
+    assert assemble.clean_book_title("极简上海志") == "极简上海志"
+    entries = assemble._split_footnote_entries("注:①HP 即马力，下同。")
+    assert entries == [["①", "HP 即马力，下同。"]], entries
+    print("[PASS] EPUB quality fixes (de-LaTeX, TOC/CIP guard, metadata, 编后记 guard, 注:① footnotes)")
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="test_ocr_fixes_") as d:
         tmp = pathlib.Path(d)
@@ -255,6 +319,7 @@ def main():
         test_xhtml_table_and_epubcheck(tmp)
         test_recrop_multi_image_fallback(tmp)
         test_review_suspects_cangshan(tmp)
+        test_epub_quality_fixes()
     print("\nALL REGRESSION TESTS PASSED!")
 
 

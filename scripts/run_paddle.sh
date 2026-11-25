@@ -3,7 +3,7 @@
 # vl needs the vLLM server from paddle_vllm_server.sh on 127.0.0.1:8118
 set -eu
 tool=$1; book=$2
-P=/mnt/e/project/provenance
+P="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source /opt/ocr/paddle/bin/activate
 export PADDLE_PDX_CACHE_HOME=/opt/ocr/cache/paddlex HF_HOME=/opt/ocr/cache/hf
 export PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True

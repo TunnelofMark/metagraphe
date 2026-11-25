@@ -4,7 +4,7 @@
 # Writes <work_dir>/result.zip, <work_dir>/raw/ (unzipped), <work_dir>/mineru.{time.json,gpu.csv,stdout.log}
 set -eu
 pdf=$1; work=$2; npages=$3
-P=/mnt/e/project/provenance
+P="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source /opt/ocr/mineru/bin/activate
 export HF_HOME=/opt/ocr/cache/hf MODELSCOPE_CACHE=/opt/ocr/cache/modelscope
 export MINERU_MODEL_SMALL_BACKEND=torch MINERU_MODEL_VLM_ENGINE=vllm
