@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Rebuild only the two-layer PDFs from existing final/book.json (after build_pdf.py changes).
-P=/mnt/e/project/provenance
+P="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 S=$P/scripts
 cd $S
 for tool in mineru_advanced paddleocr_vl ppstructurev3; do

@@ -328,30 +328,80 @@ def block_lines(page, blk, ref_lines=None):
 LATEX = [
     (r"\leqslant", "≤"), (r"\geqslant", "≥"), (r"\leq", "≤"), (r"\geq", "≥"),
     (r"\le ", "≤ "), (r"\ge ", "≥ "),
-    (r"^{\circ}", "°"), (r"\circ", "°"),
-    (r"\times", "×"), (r"\cdot", "·"), (r"\sim", "~"), (r"\pm", "±"), (r"\div", "÷"),
+    (r"\approx", "≈"), (r"\neq", "≠"), (r"\ne ", "≠ "), (r"\infty", "∞"),
+    (r"\rightarrow", "→"), (r"\leftarrow", "←"), (r"\leftrightarrow", "↔"), (r"\to ", "→ "),
+    (r"^{\circ}", "°"), (r"\degree", "°"), (r"\circ", "°"),
+    (r"\times", "×"), (r"\cdot", "·"), (r"\sim", "~"), (r"\pm", "±"), (r"\mp", "∓"), (r"\div", "÷"),
+    (r"\sqrt", "√"), (r"\angle", "∠"), (r"\perp", "⊥"), (r"\parallel", "∥"),
     (r"\%", "%"), (r"\prime", "'"), (r"\qquad", "  "), (r"\quad", " "),
     (r"\,", ""), (r"\;", ""), (r"\ ", ""),
     # Literal 1-to-1 Unicode rendering for common Greek / phonetic / editorial LaTeX macros
     (r"\varepsilon", "ε"), (r"\epsilon", "ε"), (r"\varsigma", "ς"), (r"\varphi", "φ"),
     (r"\alpha", "α"), (r"\beta", "β"), (r"\gamma", "γ"), (r"\delta", "δ"), (r"\zeta", "ζ"),
-    (r"\eta", "η"), (r"\theta", "θ"), (r"\lambda", "λ"), (r"\mu", "μ"), (r"\pi", "π"),
-    (r"\sigma", "σ"), (r"\Gamma", "Γ"), (r"\partial", "∂"), (r"\int", "∫"),
+    (r"\eta", "η"), (r"\theta", "θ"), (r"\kappa", "κ"), (r"\lambda", "λ"), (r"\mu", "μ"),
+    (r"\nu", "ν"), (r"\xi", "ξ"), (r"\pi", "π"), (r"\rho", "ρ"), (r"\sigma", "σ"),
+    (r"\tau", "τ"), (r"\phi", "φ"), (r"\chi", "χ"), (r"\psi", "ψ"), (r"\omega", "ω"),
+    (r"\Gamma", "Γ"), (r"\Delta", "Δ"), (r"\Theta", "Θ"), (r"\Lambda", "Λ"),
+    (r"\Sigma", "Σ"), (r"\Phi", "Φ"), (r"\Psi", "Ψ"), (r"\Omega", "Ω"),
+    (r"\partial", "∂"), (r"\int", "∫"),
     (r"\downarrow", "↓"), (r"\uparrow", "↑"), (r"\neg", "¬"), (r"\vee", "∨"), (r"\S", "§"),
     (r"\varnothing", "∅"), (r"\emptyset", "∅"), (r"\ell", "ℓ"),
 ]
+
+_LATEX_ENV_NAMES = r"(?:array|aligned|align\*?|cases|matrix|pmatrix|bmatrix|vmatrix|gathered)"
+_LATEX_RESIDUAL_RX = re.compile(
+    r"\\(?:left|right|begin\{?" + _LATEX_ENV_NAMES + r"|end\{?" + _LATEX_ENV_NAMES
+    + r"|text(?:bf)?|mathrm|mathbf|mathfrak|mathit|frac|Omega|omega|Delta|Sigma|Phi|Psi|Theta|Lambda"
+    + r"|alpha|beta|gamma|delta|epsilon|varepsilon|lambda|mu|pi|rho|sigma|tau|phi|varphi|chi|psi"
+    + r"|leqslant|geqslant|leq|geq|approx|neq|times|cdot|sim|pm|div|circ|degree|infty|sqrt)"
+)
+
+
+def _strip_latex_envs_and_delims(s):
+    """Strip LaTeX environment wrappers (array/aligned/cases) and \\left/\\right delimiters."""
+    has_env = bool(re.search(r"\\(?:begin|end)\{?" + _LATEX_ENV_NAMES, s))
+    # Braced environments: \begin{array}{l} ... \end{array}
+    s = re.sub(r"\\begin\{" + _LATEX_ENV_NAMES + r"\}(?:\{[^{}]*\})?", "", s)
+    s = re.sub(r"\\end\{" + _LATEX_ENV_NAMES + r"\}", "", s)
+    # Already brace-stripped residual environments: \beginarrayl, \beginaligned, \endarray, \endaligned
+    s = re.sub(r"\\beginarray[lcr|]*(?=\s|[^a-z]|$)", "", s)
+    s = re.sub(r"\\begin(?:aligned|align|cases|matrix|pmatrix|bmatrix|vmatrix|gathered)\b", "", s)
+    s = re.sub(r"\\end(?:array|aligned|align|cases|matrix|pmatrix|bmatrix|vmatrix|gathered)\b", "", s)
+    # \left / \right wrappers: drop invisible '.' and grouping braces '\{'/'\}', keep visible brackets
+    s = re.sub(r"\\(?:left|right)\s*\\[\{\}]", "", s)
+    s = re.sub(r"\\(?:left|right)\s*\\([|])", r"\1", s)
+    s = re.sub(r"\\(?:left|right)\s*\.", "", s)
+    s = re.sub(r"\\(?:left|right)\s*([(\[\]|)])", r"\1", s)
+    s = re.sub(r"\\(?:left|right)(?![A-Za-z])", "", s)
+    # Remove stray backslash directly before stripped brace/env (e.g. \left\\beginarrayl -> \)
+    if has_env:
+        s = re.sub(r"\\\\\s*", "；", s)
+        s = re.sub(r"\\&", "；", s)
+        s = re.sub(r"(?:^|\s)&(?:\s|$)", " ", s)
+        s = re.sub(r"\\(?=[；\s]|$)", "", s)
+        s = re.sub(r"^[；\s]+|[；\s]+$", "", s)
+    return s
 
 
 def _delatex(s):
     """Render unambiguous LaTeX markup to plain Unicode without altering content characters."""
     if not s:
         return s
-    # Unwrap common text wrappers first (handles nested/repeated occurrences cleanly)
-    for _ in range(3):
-        s2 = re.sub(r"\\(?:mathrm|text|textbf|mathbf|mathfrak)\{([^{}]*)\}", r"\1", s)
+    s = _strip_latex_envs_and_delims(s)
+    # Fractions: \frac{a}{b} -> a/b
+    for _ in range(2):
+        s2 = re.sub(r"\\frac\{([^{}]*)\}\{([^{}]*)\}", r"\1/\2", s)
         if s2 == s:
             break
         s = s2
+    # Unwrap common text wrappers first (handles nested/repeated occurrences cleanly)
+    for _ in range(3):
+        s2 = re.sub(r"\\(?:mathrm|text|textbf|mathbf|mathfrak|mathit)\{([^{}]*)\}", r"\1", s)
+        if s2 == s:
+            break
+        s = s2
+    # Also strip bare unbraced text/font commands (e.g. \mathrm m^2, \mathbf 1, \text 零售价格)
+    s = re.sub(r"\\(?:mathrm|text|textbf|mathbf|mathfrak|mathit)\b\s*", "", s)
     # Combining diacritics common in dialect IPA transcriptions (e.g. \tilde{\alpha} -> α̃)
     s = re.sub(r"\\tilde\{([^{}]+)\}", lambda m: _delatex(m.group(1)) + "\u0303", s)
     s = re.sub(r"\\bar\{([^{}]+)\}", lambda m: _delatex(m.group(1)) + "\u0304", s)
@@ -365,7 +415,35 @@ def _delatex(s):
     s = re.sub(r"\\ge(?![A-Za-z])", "≥", s)
     # Clean ^{'} or ^{\prime} already converted to ^{'}
     s = s.replace("^{'}", "'").replace("^'", "'")
+    s = re.sub(r" {2,}", " ", s)
     return s.replace("{", "").replace("}", "").strip()
+
+
+def clean_residual_latex(s):
+    """Idempotently clean residual LaTeX commands in already-adapted doc.json / table text
+    without altering normal prose or Markdown punctuation."""
+    if not s or "\\" not in s or not _LATEX_RESIDUAL_RX.search(s):
+        return s
+    s = _strip_latex_envs_and_delims(s)
+    for _ in range(2):
+        s2 = re.sub(r"\\frac\{([^{}]*)\}\{([^{}]*)\}", r"\1/\2", s)
+        if s2 == s:
+            break
+        s = s2
+    for _ in range(3):
+        s2 = re.sub(r"\\(?:mathrm|text|textbf|mathbf|mathfrak|mathit)\{([^{}]*)\}", r"\1", s)
+        if s2 == s:
+            break
+        s = s2
+    s = re.sub(r"\\(?:mathrm|text|textbf|mathbf|mathfrak|mathit)\b\s*", "", s)
+    for a, b in LATEX:
+        if a in s:
+            s = s.replace(a, b)
+    s = re.sub(r"\\le(?![A-Za-z])", "≤", s)
+    s = re.sub(r"\\ge(?![A-Za-z])", "≥", s)
+    # Clean leftover \left / \right backslashes around IPA or array segments
+    s = re.sub(r"\\(?=\s|$)", "", s)
+    return s
 
 
 def clean_equation(s):
@@ -388,7 +466,8 @@ def clean_html_equations(raw_html):
         raw_html,
         flags=re.I | re.S,
     )
-    return re.sub(r"</?eq\b[^>]*>", "", raw_html, flags=re.I)
+    raw_html = re.sub(r"</?eq\b[^>]*>", "", raw_html, flags=re.I)
+    return clean_residual_latex(raw_html)
 
 
 def clean_text(s):
@@ -398,6 +477,7 @@ def clean_text(s):
         return s
     s = re.sub(r"\$\$?\s*([^$\n]{1,300}?)\s*\$\$?", lambda m: _delatex(m.group(1)), s)
     s = re.sub(r"\\\(\s*([^\n]{1,300}?)\s*\\\)", lambda m: _delatex(m.group(1)), s)
+    s = clean_residual_latex(s)
     s = s.replace(r"\%", "%").replace(r"\times", "×")
     # MinerU wraps inline formulas as "...增长 \n17.2%\n ，..." -> rejoin
     s = re.sub(r"\s*\n([0-9.]+%?)\n\s*", r"\1", s)

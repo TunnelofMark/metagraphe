@@ -3,7 +3,7 @@
   python run_paddle.py vl  <book> [--server http://127.0.0.1:8118/v1]
   python run_paddle.py ppsv3 <book>
 
-Outputs: /mnt/e/project/provenance/ocr_test/{paddleocr_vl,ppstructurev3}/<book>/raw/
+Outputs: <repo>/ocr_test/{paddleocr_vl,ppstructurev3}/<book>/raw/
   pNNNN_res.json / .md per page (+ imgs/), merged/ (restructure_pages: cross-page tables, title levels)
   timing.json : per-page wall time measured around predict()
 """
@@ -13,7 +13,7 @@ import time
 import pathlib
 import argparse
 
-P = pathlib.Path("/mnt/e/project/provenance")
+P = pathlib.Path(__file__).resolve().parent.parent
 
 
 def main():

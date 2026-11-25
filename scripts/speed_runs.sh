@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Steady-state throughput on 100 consecutive pages per book (startup measured separately).
-P=/mnt/e/project/provenance
+P="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 S=$P/scripts
 # A: MinerU advanced (model load is inside the run; subtract the 2-page smoke run's fixed cost)
 for b in xigangspeed rizhaospeed; do bash $S/run_mineru.sh $b advanced > /dev/null 2>&1; done

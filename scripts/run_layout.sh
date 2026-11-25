@@ -3,7 +3,7 @@
 # Output: ocr_test/layout_only/<book>/pNNNN_res.json  (pass as LAYOUT_DIR to post_all.sh)
 set -eu
 book=$1
-P=/mnt/e/project/provenance
+P="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source /opt/ocr/paddle/bin/activate
 export PADDLE_PDX_CACHE_HOME=/opt/ocr/cache/paddlex PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
 out=$P/ocr_test/layout_only/$book

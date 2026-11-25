@@ -1,6 +1,7 @@
 # Book outputs, scans, and copyrighted deliverables (never commit)
 ocr_full/
 ocr_yibai/
+ocr_youji/
 ocr_test/
 download/
 *.pdf

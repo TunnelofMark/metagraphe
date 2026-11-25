@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Batch driver for the 地方志 full-book OCR (runs inside WSL, stdlib only).
 
-  python3 /mnt/e/project/provenance/scripts/run_all.py [--only NAME ...] [--limit N] [--root DIR]
+  python3 scripts/run_all.py [--only NAME ...] [--limit N] [--root DIR]
 
   Start / resume (from PowerShell):
-    $env:WSL_UTF8=1; wsl -d Ubuntu-24.04 -u root -- bash /mnt/e/project/provenance/scripts/run_all.sh [args]
+    $env:WSL_UTF8=1; wsl -d Ubuntu-24.04 -u root -- bash /mnt/e/project/metagraphe/scripts/run_all.sh [args]
 
 Per book (name = file stem, e.g. XFZ23703.西岗区志) everything goes to ocr_full/<name>/:
   book.md images/ book.json <name>.epub <name>_双层.pdf qa.json hybrid_log.json logs/ state/ work/
@@ -35,7 +35,7 @@ import subprocess
 import pathlib
 from concurrent.futures import ThreadPoolExecutor
 
-P = pathlib.Path("/mnt/e/project/provenance")
+P = pathlib.Path(__file__).resolve().parent.parent
 S = P / "scripts"
 SRC_ROOT = pathlib.Path("/mnt/h/电子书/地方志")
 OUT_ROOT = P / "ocr_full"
